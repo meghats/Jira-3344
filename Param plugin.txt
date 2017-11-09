@@ -1,0 +1,161 @@
+/**
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ * Copyright: OpenLink International.BANGALORE INDIA 
+ *
+ * 
+ * Project : NTMA. Findur Upgrade and Implementation    
+ * Customer NTMA.
+ * last modified date :27/Oct/2017
+ * 
+ *  
+ * @author Megha T S. OLF Bangalore 
+ * @modified by : 
+
+ * @version   1.0
+ *  This is param script,which provides the Ask window to get inputs (Report name and simulation run date) from user 
+ * 
+ */
+
+package ie.ntma.reports;
+
+import com.customer.ntma.logger;
+import com.olf.openjvs.Ask;
+import com.olf.openjvs.IContainerContext;
+import com.olf.openjvs.IScript;
+import com.olf.openjvs.OCalendar;
+import com.olf.openjvs.OException;
+import com.olf.openjvs.Table;
+import com.olf.openjvs.Util;
+import com.olf.openjvs.enums.ASK_SELECT_TYPES;
+import com.olf.openjvs.enums.ASK_TEXT_DATA_TYPES;
+import com.olf.openjvs.enums.COL_TYPE_ENUM;
+
+import ie.ntma.dataload.lookup.NTMA_CONSTANTS;
+
+public class PortfolioValuationReportsParam implements IScript {
+
+	private logger log;
+
+	String reportName = null;
+	String simRunDate = null;
+
+	Table arg = Util.NULL_TABLE;
+
+	public void execute(IContainerContext context) throws OException {
+
+		log = new logger();
+		log.start();
+		// declared local variables
+		int date, canAccessGui;
+		String systemDate;
+		Table reportsList = Table.tableNew("Reports List");
+		Table ask = Table.tableNew();
+
+		try {
+			canAccessGui = Util.canAccessGui();
+			//check for the Engine can access GUI functions or not
+			if(canAccessGui == 1){
+				//log.log("engin can access the GUI functions");
+			}
+			else{
+				String errorMsg = "This task is for only user interface and cannot be run through the workflow";
+				log.log(errorMsg);
+				throw new OException(errorMsg);
+			}
+			arg = context.getArgumentsTable();
+			// creating report list table
+			createReportList(reportsList);
+
+			// system current date to set as default simRunDate
+			date = OCalendar.today();
+			systemDate = OCalendar.formatJd(date);
+
+			// providing ASK window to get the report name
+			Ask.setAvsTable(ask, reportsList, "Report Name", 1,
+					ASK_SELECT_TYPES.ASK_SINGLE_SELECT.toInt(), 1);
+			// providing TextEdit to select simulation run date
+			Ask.setTextEdit(ask, "Simulation Run Date", systemDate,
+					ASK_TEXT_DATA_TYPES.ASK_DATE);
+			Ask.viewTable(ask, "Report selection window",
+					"select which report needs to be run");
+
+			// Retrieving user input data from tAsk table
+			retrieveUserInputDataFromAsk(ask);
+
+			// setting input data to argTable
+			setInputDataToArgumentsTable();
+
+		} catch (Throwable e) {
+			log.log("Fail to get the user input data from ASK input window. "
+					+ e.getLocalizedMessage());
+		} finally {
+			ask.destroy();
+			reportsList.destroy();
+		}
+
+	}
+
+	/**
+	 * This method is to set the user input data to Arguments Table
+	 * @throws OException
+	 */
+	private void setInputDataToArgumentsTable() throws OException {
+
+		log.log("setInputDataToArgumentsTable method started");
+
+		int colNumReportName, colNumRunDate;
+
+		arg.addCols("S(report_name),S(run_date)");
+		arg.addRow();
+		colNumReportName = arg.getColNum("report_name");
+		colNumRunDate = arg.getColNum("run_date");
+		arg.setString(colNumReportName, 1, reportName);
+		arg.setString(colNumRunDate, 1, simRunDate);
+
+		log.log("setInputDataToArgumentsTable method ended");
+	}
+
+	/**
+	 * This method is to retrieve the user input data from Ask table
+	 * @param ask table which has user input data
+	 * @throws OException
+	 */
+	private void retrieveUserInputDataFromAsk(Table ask) throws OException {
+
+		log.log("retrieveUserInputDataFromAsk method started");
+
+		int returnValueColNum, returnValColNum;
+		Table reportListSelected = Table.tableNew();
+		Table simRunDateSelected = Table.tableNew();
+
+		reportListSelected = ask.getTable("return_value", 1);
+		returnValueColNum = reportListSelected.getColNum("return_value");
+		reportName = reportListSelected.getString(returnValueColNum, 1);
+		simRunDateSelected = ask.getTable("return_value", 2);
+		returnValColNum = simRunDateSelected.getColNum("return_value");
+		simRunDate = simRunDateSelected.getString(returnValColNum, 1);
+
+		reportListSelected.destroy();
+		simRunDateSelected.destroy();
+
+		log.log("retrieveUserInputDataFromAsk method ended");
+	}
+
+	/**
+	 * This method is to create the report list table
+	 * @param reportList is a empty table passed as a parameter create a report list
+	 * @throws OException
+	 */
+	private void createReportList(Table reportsList) throws OException {
+
+		log.log("createReportList method started");
+
+		reportsList.addCol("report_name", COL_TYPE_ENUM.COL_STRING);
+		reportsList.addNumRows(3);
+		reportsList.setString(1, 1, NTMA_CONSTANTS.POSBF_PORTFOLIO_VALUATION_REPORT);
+		reportsList.setString(1, 2, NTMA_CONSTANTS.DORMANT_ACCOUNT_PORTFOLIO_VALUATION1);
+		reportsList.setString(1, 3, NTMA_CONSTANTS.DORMANT_ACCOUNT_PORTFOLIO_VALUATION2);
+
+		log.log("creteReportList method ended");
+	}
+}

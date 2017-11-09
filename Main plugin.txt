@@ -1,0 +1,256 @@
+/**
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ * Copyright: OpenLink International.BANGALORE INDIA 
+ *
+ * 
+ * Project : NTMA. Findur Upgrade and Implementation    
+ * Customer NTMA.
+ * last modified date :27/Oct/2017
+ * 
+ *  
+ * @author Megha T S. OLF Bangalore 
+ * @modified by : 
+
+ * @version   1.0
+ *  This is Main Script, which is used to fetch Effective value of O/N grid point of EONIA.EUR index by using user inputs
+ * and set it in report and run the same report
+ */
+package ie.ntma.reports;
+
+import com.customer.ntma.logger;
+import com.olf.openjvs.IContainerContext;
+import com.olf.openjvs.IScript;
+import com.olf.openjvs.OCalendar;
+import com.olf.openjvs.OException;
+import com.olf.openjvs.Ref;
+import com.olf.openjvs.ReportBuilder;
+import com.olf.openjvs.Sim;
+import com.olf.openjvs.SimResult;
+import com.olf.openjvs.SimResultType;
+import com.olf.openjvs.Str;
+import com.olf.openjvs.Table;
+import com.olf.openjvs.Util;
+import com.olf.openjvs.enums.PFOLIO_RESULT_TYPE;
+import com.olf.openjvs.enums.SHM_USR_TABLES_ENUM;
+import com.olf.openjvs.enums.SIMULATION_RUN_TYPE;
+
+import ie.ntma.dataload.lookup.NTMA_CONSTANTS;
+
+public class PortfolioValuationReportsMain implements IScript {
+
+	private logger log;
+
+	String reportName, runDate, scenarioIdParam, portfolio, portfolioNew;
+
+	public void execute(IContainerContext context) throws OException {
+
+		log = new logger();
+		log.start();
+
+		Table arg;
+		double finalEcbRate;
+		ReportBuilder subReportBuilder = null;
+
+		try {
+			arg = context.getArgumentsTable();
+
+			//check for the required parameter from arguments table
+			if(arg.getNumRows() > 0){
+				// get report name and run date inputs from arguments table
+				reportName = arg.getString("report_name", 1);
+				runDate = arg.getString("run_date", 1);
+			}
+			else{
+				String errorMsg = "User Input not found. Kindly run the task through GUI.";
+				log.log(errorMsg);
+				throw new OException(errorMsg);
+			}
+
+			if (!reportName.equals(null) || !reportName.equals("")) {
+				// creating report builder object to fetch the parameters required to proceed in the next step
+				ReportBuilder reportBuilder = ReportBuilder
+						.createNew(reportName);
+
+				// fetching required parameters from report
+				getParameterFromReport(reportBuilder);
+
+				// get Effective value of O/N grid point of EONIA.EUR index
+				finalEcbRate = getEcbRate(runDate, portfolio);
+				//check for another portfolio in order get the Ecb rate if the report is Dormant Account Portfolio Valuation2 
+				if(reportName.equals(NTMA_CONSTANTS.DORMANT_ACCOUNT_PORTFOLIO_VALUATION2)&& finalEcbRate == 0.0)
+				{
+					finalEcbRate = getEcbRate(runDate, portfolioNew);
+				}
+
+				// setting ECB and REVAL_START_DATE parameters to report and run the same report
+				setParamRunReport(reportBuilder, finalEcbRate, reportName,
+						runDate);
+			} else {
+				log.log(" User input report name is null,fail to proceed with next step.for more deatail check with error log file");
+				Util.exitFail();
+			}
+		} catch (Throwable e) {
+			String errorMsg = " Fail to fetch ECB rate and to run the report "
+					+ reportName + ", for date " + runDate + " "
+					+ e.getLocalizedMessage();
+			log.log(errorMsg);
+			Util.exitFail(errorMsg);
+		}
+	}
+
+	/**
+	 * This method is to get the parameter from report(user selected report) which are required to proceed with next step
+	 * @param ReportBuilder object to fetch the parameter from the report
+	 * @throws OException
+	 */
+	private void getParameterFromReport(ReportBuilder reportBuilder)
+			throws OException {
+
+		log.log("getParameterFromReport method is started");
+
+		scenarioIdParam = reportBuilder.getParameter("sim_transaction",
+				"SCENARIO_ID");
+		portfolio = reportBuilder.getParameter("ALL", "PORTFOLIO");
+
+		//fetching other portfolio for only DORMANT_ACCOUNT_PORTFOLIO_VALUATION2 report
+		if(reportName.equals(NTMA_CONSTANTS.DORMANT_ACCOUNT_PORTFOLIO_VALUATION2))
+		{
+			portfolioNew = reportBuilder.getParameter("ALL", "PORTFOLIO1");
+		}
+
+		log.log("getParameterFromReport method is ended");
+	}
+
+	/**
+	 * This method is to set the parameter on report(user selected report)and run the same report
+	 * @param ReportBuilder object to fetch the parameter from the report
+	 * @param finalEcbRate which is effective rate of O/N grid of EONIA.EUR index
+	 * @param reportName contains the report name which user selected to be run
+	 * @param runDate contains the simulation run date which user has given as input
+	 * @throws OException
+	 */
+	private void setParamRunReport(ReportBuilder reportBuilder,
+			double finalEcbRate, String reportName, String runDate)
+					throws OException {
+
+		String subReport = null;
+		log.log("setParamRunReport method is started");
+		Table reportData = Util.NULL_TABLE;
+
+		//setting parameter to sub report "POSBF Outstanding Deals"
+		if(reportName.equals(NTMA_CONSTANTS.POSBF_PORTFOLIO_VALUATION_REPORT)) {
+			subReport = "POSBF Outstanding Deals";
+		}
+		else if(reportName.equals(NTMA_CONSTANTS.DORMANT_ACCOUNT_PORTFOLIO_VALUATION1)) {
+			subReport = "Dormant Account OutStanding Deals1";
+		}
+		else {
+			subReport = "Dormant Account OutStanding Deals2";
+		}
+		ReportBuilder subReportBuilder = ReportBuilder.createNew(subReport);
+		subReportBuilder.setParameter("sim_cashflow_by_day", "REVAL_START_DATE", runDate);
+
+		//setting parameter to main report which user has selected
+		reportBuilder.setParameter("sim_transaction", "REVAL_START_DATE",
+				runDate);
+		reportBuilder.setParameter("ALL", "ECB", "" + finalEcbRate);
+
+		reportData = Table.tableNew();
+		reportBuilder.setOutputTable(reportData);
+		reportBuilder.runReport();
+		reportData.destroy();
+		reportBuilder.dispose();
+
+		log.log("setParamRunReport method is ended");
+	}
+
+	/**
+	 * This method is to fetch the Effective value of O/N grid point of EONIA.EUR index
+	 * @param runDate contains the simulation run date which user has given as input
+	 * @param portfolio from particular report to get Ecb Rate
+	 * @throws OException
+	 * @return EcbRate
+	 */
+	private double getEcbRate(String runDate, String portfolio)
+			throws OException {
+		log.log("getEcbRate method is started");
+
+		int date, portfolioId;
+		double finalEcbRate = 0.0;
+		Table simResults;
+
+		// converting user input runDate type from string to julian date
+		date = OCalendar.strToDate(runDate);
+
+		// get value for portfolio
+		portfolioId = Ref.getValue(SHM_USR_TABLES_ENUM.PORTFOLIO_TABLE,
+				portfolio);
+
+		// loading saved set of simulation results from database
+		simResults = SimResult.tableLoadSrun(portfolioId,
+				SIMULATION_RUN_TYPE.EOD_SIM_TYPE.toInt(), date);
+
+		if (Table.isTableValid(simResults) != 1) {
+			log.log("\nUnsuccessful in attempt to retrieve EOD Sim Results for "
+					+ portfolio + " And for date " + runDate);
+		} else {
+			log.log("\nSuccessfully retrieved Sim results");
+
+			// fetching ecb rate from the loaded simResults Table
+			finalEcbRate = getEcbRateFromSimresults(simResults);
+			simResults.destroy();
+		}
+
+		log.log("getEcbRate method is ended");
+		return finalEcbRate;
+	}
+
+	/**
+	 * This method is to fetch the Effective value of O/N grid point of EONIA.EUR index from loaded simResults table
+	 * @param simResults table which contains results for different scenarios
+	 * @throws OException
+	 * @return finalEcbRate
+	 */
+	private double getEcbRateFromSimresults(Table simResults) throws OException {
+
+		log.log("getEcbRateFromSimresults method is started");
+
+		int resultType, indexId, scenarioId;
+		double ecbRate, finalEcbRate;
+
+		Table scenarioResults;
+		Table generalResults;
+		Table resultList;
+		Table selectedGeneralResult = Table.tableNew();
+		Table indexRateResult;
+		Table effectiveValue = Table.tableNew();
+
+		scenarioId = Str.strToInt(scenarioIdParam);
+		scenarioResults = simResults.getTable("scenario_results", scenarioId);
+		generalResults = scenarioResults.getTable(1, 4);
+
+		// To get the result type for Index Rate result, initializing a list of results for simulation
+		resultList = Sim.createResultListForSim();
+		// Adding Index Rate result to a table
+		SimResult.addResultForSim(resultList, SimResultType
+				.create(PFOLIO_RESULT_TYPE.INDEX_RATE_RESULT.toString()));
+		// fetching result type from table
+		resultType = resultList.getInt(1, 1);
+		indexId = Ref.getValue(SHM_USR_TABLES_ENUM.INDEX_TABLE, NTMA_CONSTANTS.EONIA_EUR_INDEX_NAME);
+
+		selectedGeneralResult.select(generalResults, "result",
+				"result_type EQ " + resultType + " AND disc_idx EQ " + indexId);
+		indexRateResult = selectedGeneralResult.getTable(1, 1);
+		effectiveValue.select(indexRateResult, "effective_value", "label EQ "
+				+ NTMA_CONSTANTS.OVERNIGHT_GRID_NAME);
+		ecbRate = effectiveValue.getDouble(1, 1);
+		// converting ecbRate from decimal to percentage
+		finalEcbRate = ecbRate * 100;
+
+		selectedGeneralResult.destroy();
+		effectiveValue.destroy();
+		log.log("getEcbRateFromSimresults method is ended");
+		return finalEcbRate;
+	}
+
+}
